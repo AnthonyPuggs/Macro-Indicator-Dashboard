@@ -42,18 +42,28 @@ def get_abs_data():
     """Fetches Unemployment Rate (Seasonally Adjusted) from ABS."""
     try:
         # Catalogue 6202.0, Series ID A84423050A
-        # This function returns a tuple: (DataFrame, Metadata)
         abs_data, abs_meta = ra.read_abs_series("6202.0", "A84423050A")
         
-        # FIX: Remove the manual filtering for 'series_id'. 
-        # The function read_abs_series already fetched the specific data we asked for.
-        df_unemp = abs_data.copy()
+        # 1. Reset index to move Dates into a column
+        df_unemp = abs_data.reset_index()
         
-        # Normalize column names to lowercase to avoid "Date" vs "date" issues
-        df_unemp.columns = [c.lower() for c in df_unemp.columns]
+        # 2. Lowercase all column names for consistency
+        df_unemp.columns = [str(c).lower() for c in df_unemp.columns]
         
-        # Ensure the date column is in the right format
-        # Sometimes it comes as a 'Period' (e.g., "Sep-2023") which crashes plots
+        # 3. Dynamic Renaming:
+        # The column named 'series id' is actually the Date.
+        # The column named 'a84423050a' is the Value.
+        if 'series id' in df_unemp.columns:
+            df_unemp = df_unemp.rename(columns={'series id': 'date'})
+            
+        if 'a84423050a' in df_unemp.columns:
+            df_unemp = df_unemp.rename(columns={'a84423050a': 'value'})
+            
+        # 4. Fallback: If 'index' exists instead, rename it to 'date'
+        if 'index' in df_unemp.columns:
+            df_unemp = df_unemp.rename(columns={'index': 'date'})
+
+        # 5. Clean up Date Format
         if 'date' in df_unemp.columns:
             if pd.api.types.is_period_dtype(df_unemp['date']):
                  df_unemp['date'] = df_unemp['date'].dt.to_timestamp()
@@ -65,8 +75,6 @@ def get_abs_data():
         return df_unemp
     except Exception as e:
         st.error(f"Error fetching ABS data: {e}")
-        # DEBUG: If it fails, uncomment the line below to see what columns ARE there
-        # st.write("Available columns:", ra.read_abs_series("6202.0", "A84423050A")[0].columns)
         return pd.DataFrame()
 
 # --- Main App Layout ---
@@ -134,15 +142,19 @@ with col2:
         # FIX 3: Replaced deprecated use_container_width=True with width="stretch"
         st.plotly_chart(fig_abs, width="stretch")
 
-# --- Data Explorer ---
+# --- Data Explorer / Table View ---
 with st.expander("📊 View Raw Data"):
     tab1, tab2 = st.tabs(["RBA Data", "ABS Data"])
+    
     with tab1:
         if not df_rba.empty:
             st.dataframe(df_rba.sort_values('Date', ascending=False), width="stretch")
+            
     with tab2:
         if not df_abs.empty:
-            st.dataframe(df_abs[['date', 'value', 'series_id']].sort_values('date', ascending=False), width="stretch")
+            # FIX: We removed specific column selection like [['date', 'value', 'series_id']]
+            # Just showing the whole dataframe is safer and cleaner.
+            st.dataframe(df_abs.sort_values('date', ascending=False), width="stretch")
 
 st.markdown("---")
 st.caption("Dashboard generated using Streamlit and `readabs`.")
