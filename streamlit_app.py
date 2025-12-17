@@ -16,50 +16,35 @@ st.markdown("Data sourced live from the **RBA** and **ABS** using the `readabs` 
 # --- Helper Functions ---
 
 @st.cache_data(ttl=3600)
-def get_rba_data():
-    """Fetches the Official Cash Rate (OCR) from the RBA."""
-    try:
-        # read_rba_ocr returns a pandas Series with a PeriodIndex
-        ocr_series = ra.read_rba_ocr()
-        
-        # FIX 1: Convert PeriodIndex to Timestamp for Plotly compatibility
-        # If the index is already datetime, this line is harmless. 
-        # If it is a Period (e.g. '2023-11'), it becomes 2023-11-01.
-        if isinstance(ocr_series.index, pd.PeriodIndex):
-            ocr_series.index = ocr_series.index.to_timestamp()
-        
-        # Convert to DataFrame
-        df_ocr = ocr_series.reset_index()
-        df_ocr.columns = ['Date', 'Cash Rate']
-        df_ocr = df_ocr.sort_values('Date')
-        return df_ocr
-    except Exception as e:
-        st.error(f"Error fetching RBA data: {e}")
-        return pd.DataFrame()
-
-@st.cache_data(ttl=3600)
 def get_abs_data():
     """Fetches Unemployment Rate (Seasonally Adjusted) from ABS."""
     try:
         # Catalogue 6202.0, Series ID A84423050A
+        # This function returns a tuple: (DataFrame, Metadata)
         abs_data, abs_meta = ra.read_abs_series("6202.0", "A84423050A")
         
-        # Filter for the specific series
-        df_unemp = abs_data[abs_data['series_id'] == "A84423050A"].copy()
+        # FIX: Remove the manual filtering for 'series_id'. 
+        # The function read_abs_series already fetched the specific data we asked for.
+        df_unemp = abs_data.copy()
         
-        # FIX 2: Check for Period dtype in the date column and convert
-        # readabs often returns 'date' as a PeriodDtype (e.g. Month)
-        if pd.api.types.is_period_dtype(df_unemp['date']):
-             df_unemp['date'] = df_unemp['date'].dt.to_timestamp()
-        else:
-             # Fallback: ensure it's datetime just in case
-             df_unemp['date'] = pd.to_datetime(df_unemp['date'])
-             
+        # Normalize column names to lowercase to avoid "Date" vs "date" issues
+        df_unemp.columns = [c.lower() for c in df_unemp.columns]
+        
+        # Ensure the date column is in the right format
+        # Sometimes it comes as a 'Period' (e.g., "Sep-2023") which crashes plots
+        if 'date' in df_unemp.columns:
+            if pd.api.types.is_period_dtype(df_unemp['date']):
+                 df_unemp['date'] = df_unemp['date'].dt.to_timestamp()
+            else:
+                 df_unemp['date'] = pd.to_datetime(df_unemp['date'])
+                 
         df_unemp = df_unemp.sort_values('date')
         
         return df_unemp
     except Exception as e:
         st.error(f"Error fetching ABS data: {e}")
+        # DEBUG: If it fails, uncomment the line below to see what columns ARE there
+        # st.write("Available columns:", ra.read_abs_series("6202.0", "A84423050A")[0].columns)
         return pd.DataFrame()
 
 # --- Main App Layout ---
