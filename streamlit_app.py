@@ -15,14 +15,20 @@ st.markdown("Data sourced live from the **RBA** and **ABS** using the `readabs` 
 
 # --- Helper Functions ---
 
-@st.cache_data(ttl=3600)  # Cache data for 1 hour to prevent spamming the API
+@st.cache_data(ttl=3600)
 def get_rba_data():
     """Fetches the Official Cash Rate (OCR) from the RBA."""
     try:
-        # read_rba_ocr returns a pandas Series
+        # read_rba_ocr returns a pandas Series with a PeriodIndex
         ocr_series = ra.read_rba_ocr()
         
-        # Convert to DataFrame for easier plotting
+        # FIX 1: Convert PeriodIndex to Timestamp for Plotly compatibility
+        # If the index is already datetime, this line is harmless. 
+        # If it is a Period (e.g. '2023-11'), it becomes 2023-11-01.
+        if isinstance(ocr_series.index, pd.PeriodIndex):
+            ocr_series.index = ocr_series.index.to_timestamp()
+        
+        # Convert to DataFrame
         df_ocr = ocr_series.reset_index()
         df_ocr.columns = ['Date', 'Cash Rate']
         df_ocr = df_ocr.sort_values('Date')
@@ -35,17 +41,20 @@ def get_rba_data():
 def get_abs_data():
     """Fetches Unemployment Rate (Seasonally Adjusted) from ABS."""
     try:
-        # Catalogue 6202.0, Series ID A84423050A (Unemployment Rate: Seasonally Adjusted)
-        # read_abs_series returns a tuple: (Data, Metadata)
+        # Catalogue 6202.0, Series ID A84423050A
         abs_data, abs_meta = ra.read_abs_series("6202.0", "A84423050A")
         
-        # Clean up the DataFrame
-        # The library returns columns typically like 'date', 'value', etc.
-        # We filter for the specific series just in case, though we requested one.
+        # Filter for the specific series
         df_unemp = abs_data[abs_data['series_id'] == "A84423050A"].copy()
         
-        # Ensure date is datetime
-        df_unemp['date'] = pd.to_datetime(df_unemp['date'])
+        # FIX 2: Check for Period dtype in the date column and convert
+        # readabs often returns 'date' as a PeriodDtype (e.g. Month)
+        if pd.api.types.is_period_dtype(df_unemp['date']):
+             df_unemp['date'] = df_unemp['date'].dt.to_timestamp()
+        else:
+             # Fallback: ensure it's datetime just in case
+             df_unemp['date'] = pd.to_datetime(df_unemp['date'])
+             
         df_unemp = df_unemp.sort_values('date')
         
         return df_unemp
@@ -55,7 +64,6 @@ def get_abs_data():
 
 # --- Main App Layout ---
 
-# Create two columns for the Key Metrics
 col1, col2 = st.columns(2)
 
 # Load Data
@@ -68,7 +76,6 @@ with col1:
     st.subheader("🏦 RBA Official Cash Rate")
     
     if not df_rba.empty:
-        # Metric Display (Current vs Previous)
         latest_ocr = df_rba['Cash Rate'].iloc[-1]
         prev_ocr = df_rba['Cash Rate'].iloc[-2]
         delta = latest_ocr - prev_ocr
@@ -77,10 +84,9 @@ with col1:
             label="Current Cash Rate", 
             value=f"{latest_ocr}%", 
             delta=f"{delta:.2f}%",
-            delta_color="inverse" # Interest rate hikes usually displayed as 'red' in finance/inverse logic context, or 'normal'
+            delta_color="inverse"
         )
         
-        # Plot
         fig_rba = px.line(
             df_rba, 
             x='Date', 
@@ -89,14 +95,15 @@ with col1:
             template="plotly_white"
         )
         fig_rba.update_traces(line_color='#FF5733')
-        st.plotly_chart(fig_rba, use_container_width=True)
+        
+        # FIX 3: Replaced deprecated use_container_width=True with width="stretch"
+        st.plotly_chart(fig_rba, width="stretch")
 
 # --- Section 2: ABS Unemployment ---
 with col2:
     st.subheader("👷 ABS Unemployment Rate")
     
     if not df_abs.empty:
-        # Metric Display
         latest_unemp = df_abs['value'].iloc[-1]
         prev_unemp = df_abs['value'].iloc[-2]
         delta_unemp = latest_unemp - prev_unemp
@@ -105,10 +112,9 @@ with col2:
             label="Unemployment Rate (Seas. Adj.)", 
             value=f"{latest_unemp}%", 
             delta=f"{delta_unemp:.2f}%",
-            delta_color="inverse" # Lower unemployment is green (good)
+            delta_color="inverse"
         )
         
-        # Plot
         fig_abs = px.line(
             df_abs, 
             x='date', 
@@ -117,15 +123,19 @@ with col2:
             template="plotly_white"
         )
         fig_abs.update_traces(line_color='#33C1FF')
-        st.plotly_chart(fig_abs, use_container_width=True)
+        
+        # FIX 3: Replaced deprecated use_container_width=True with width="stretch"
+        st.plotly_chart(fig_abs, width="stretch")
 
-# --- Data Explorer / Table View ---
+# --- Data Explorer ---
 with st.expander("📊 View Raw Data"):
     tab1, tab2 = st.tabs(["RBA Data", "ABS Data"])
     with tab1:
-        st.dataframe(df_rba.sort_values('Date', ascending=False), use_container_width=True)
+        if not df_rba.empty:
+            st.dataframe(df_rba.sort_values('Date', ascending=False), width="stretch")
     with tab2:
-        st.dataframe(df_abs[['date', 'value', 'series_id']].sort_values('date', ascending=False), use_container_width=True)
+        if not df_abs.empty:
+            st.dataframe(df_abs[['date', 'value', 'series_id']].sort_values('date', ascending=False), width="stretch")
 
 st.markdown("---")
 st.caption("Dashboard generated using Streamlit and `readabs`.")
