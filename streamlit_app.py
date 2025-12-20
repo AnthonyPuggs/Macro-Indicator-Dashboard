@@ -1,7 +1,9 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
+import plotly.graph_objects as go
 import readabs as ra
+from datetime import datetime
 
 # Page Configuration
 st.set_page_config(
@@ -10,7 +12,7 @@ st.set_page_config(
     layout="wide"
 )
 
-st.title("🇦🇺 Australian Macroeconomic Dashboard")
+st.title("🇦🇺 Australian Macroeconomic Indicator Dashboard")
 st.markdown("Data sourced live from the **RBA** and **ABS** using the `readabs` Python library.")
 
 # --- Helper Functions ---
@@ -51,8 +53,6 @@ def get_abs_data():
         df_unemp.columns = [str(c).lower() for c in df_unemp.columns]
         
         # 3. Dynamic Renaming:
-        # The column named 'series id' is actually the Date.
-        # The column named 'a84423050a' is the Value.
         if 'series id' in df_unemp.columns:
             df_unemp = df_unemp.rename(columns={'series id': 'date'})
             
@@ -65,7 +65,8 @@ def get_abs_data():
 
         # 5. Clean up Date Format
         if 'date' in df_unemp.columns:
-            if pd.api.types.is_period_dtype(df_unemp['date']):
+            # FIX: Use isinstance check on the dtype attribute
+            if isinstance(df_unemp['date'].dtype, pd.PeriodDtype):
                  df_unemp['date'] = df_unemp['date'].dt.to_timestamp()
             else:
                  df_unemp['date'] = pd.to_datetime(df_unemp['date'])
@@ -76,7 +77,7 @@ def get_abs_data():
     except Exception as e:
         st.error(f"Error fetching ABS data: {e}")
         return pd.DataFrame()
-
+        
 # --- Main App Layout ---
 
 col1, col2 = st.columns(2)
