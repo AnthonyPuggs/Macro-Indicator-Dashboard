@@ -3,6 +3,7 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import readabs as ra
+import st_yled
 from datetime import datetime
 
 # Page Configuration
@@ -11,6 +12,16 @@ st.set_page_config(
     page_icon="📈",
     layout="wide"
 )
+
+# --- Custom CSS for Metrics ---
+st.markdown("""
+<style>
+    /* Remove default background from metrics so they blend in */
+    [data-testid="stMetric"] {
+        background-color: transparent !important;
+    }
+</style>
+""", unsafe_allow_html=True)
 
 # --- Sidebar ---
 with st.sidebar:
@@ -30,6 +41,31 @@ with st.sidebar:
     st.caption("Online • RBA Data Ready")
 
 # --- Helper Functions ---
+
+def card_container(key):
+    """Creates a styled container using st_yled with custom hover effects."""
+    # Inject custom CSS for properties not yet supported by st_yled (radius, shadow, hover)
+    st.markdown(f"""
+    <style>
+    .st-key-{key} {{
+        border-radius: 10px !important;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1) !important;
+        transition: border-color 0.3s ease !important;
+        padding: 15px !important;
+    }}
+    .st-key-{key}:hover {{
+        border-color: #FF4B4B !important;
+    }}
+    </style>
+    """, unsafe_allow_html=True)
+    
+    return st_yled.container(
+        key=key,
+        background_color="#1C1C1E",
+        border_color="#3A3A3C",
+        border_width="1px",
+        border_style="solid"
+    )
 
 @st.cache_data(ttl=3600)
 def get_rba_data():
@@ -154,71 +190,75 @@ m1, m2, m3, m4 = st.columns(4)
 
 # 1. RBA Cash Rate
 with m1:
-    if not df_rba.empty:
-        latest_ocr = df_rba['Cash Rate'].iloc[-1]
-        prev_ocr = df_rba['Cash Rate'].iloc[-2]
-        delta = latest_ocr - prev_ocr
-        
-        st.metric(
-            label="RBA Cash Rate", 
-            value=f"{latest_ocr:.2f}%", 
-            delta=f"{delta:.2f}% (Held)" if delta == 0 else f"{delta:.2f}%",
-            delta_color="off" if delta == 0 else "inverse"
-        )
-    else:
-        st.metric("RBA Cash Rate", "N/A")
+    with card_container(key="card_m1"):
+        if not df_rba.empty:
+            latest_ocr = df_rba['Cash Rate'].iloc[-1]
+            prev_ocr = df_rba['Cash Rate'].iloc[-2]
+            delta = latest_ocr - prev_ocr
+            
+            st.metric(
+                label="RBA Cash Rate", 
+                value=f"{latest_ocr:.2f}%", 
+                delta=f"{delta:.2f}% (Held)" if delta == 0 else f"{delta:.2f}%",
+                delta_color="off" if delta == 0 else "inverse"
+            )
+        else:
+            st.metric("RBA Cash Rate", "N/A")
 
 # 2. Unemployment
 with m2:
-    if not df_abs.empty:
-        latest_unemp = df_abs['value'].iloc[-1]
-        prev_unemp = df_abs['value'].iloc[-2]
-        delta_unemp = latest_unemp - prev_unemp
-        
-        st.metric(
-            label="Unemployment", 
-            value=f"{latest_unemp}%", 
-            delta=f"{delta_unemp:.1f}% vs prev month",
-            delta_color="inverse"
-        )
-    else:
-        st.metric("Unemployment", "N/A")
+    with card_container(key="card_m2"):
+        if not df_abs.empty:
+            latest_unemp = df_abs['value'].iloc[-1]
+            prev_unemp = df_abs['value'].iloc[-2]
+            delta_unemp = latest_unemp - prev_unemp
+            
+            st.metric(
+                label="Unemployment", 
+                value=f"{latest_unemp:.2f}%", 
+                delta=f"{delta_unemp:.1f}% vs prev month",
+                delta_color="inverse"
+            )
+        else:
+            st.metric("Unemployment", "N/A")
 
 # 3. CPI (Trimmed)
 with m3:
-    if not df_cpi.empty:
-        # Get latest non-NaN value
-        valid_cpi = df_cpi.dropna()
-        if not valid_cpi.empty:
-            latest_cpi = valid_cpi['Value'].iloc[-1]
-            # Target: 2-3%
-            st.metric(
-                label="CPI (Trimmed)", 
-                value=f"{latest_cpi}%", 
-                delta="Target: 2-3%",
-                delta_color="off" # Grey color for target
-            )
+    with card_container(key="card_m3"):
+        if not df_cpi.empty:
+            # Get latest non-NaN value
+            valid_cpi = df_cpi.dropna()
+            if not valid_cpi.empty:
+                latest_cpi = valid_cpi['Value'].iloc[-1]
+                # Target: 2-3%
+                st.metric(
+                    label="CPI (Trimmed)", 
+                    value=f"{latest_cpi}%", 
+                    delta="Target: 2-3%",
+                    delta_color="off" # Grey color for target
+                )
+            else:
+                st.metric("CPI (Trimmed)", "N/A")
         else:
             st.metric("CPI (Trimmed)", "N/A")
-    else:
-        st.metric("CPI (Trimmed)", "N/A")
 
 # 4. Exp. Inflation (1yr)
 with m4:
-    if not df_exp.empty:
-        valid_exp = df_exp.dropna()
-        if not valid_exp.empty:
-            latest_exp = valid_exp['Value'].iloc[-1]
-            st.metric(
-                label="Exp. Inflation (1yr)", 
-                value=f"{latest_exp}%", 
-                delta="Market Economists",
-                delta_color="off"
-            )
+    with card_container(key="card_m4"):
+        if not df_exp.empty:
+            valid_exp = df_exp.dropna()
+            if not valid_exp.empty:
+                latest_exp = valid_exp['Value'].iloc[-1]
+                st.metric(
+                    label="Exp. Inflation (1yr)", 
+                    value=f"{latest_exp}%", 
+                    delta="Market Economists",
+                    delta_color="off"
+                )
+            else:
+                st.metric("Exp. Inflation (1yr)", "N/A")
         else:
             st.metric("Exp. Inflation (1yr)", "N/A")
-    else:
-        st.metric("Exp. Inflation (1yr)", "N/A")
 
 st.markdown("---")
 
@@ -227,47 +267,50 @@ col1, col2 = st.columns(2)
 
 # --- Section 1: RBA Cash Rate Chart ---
 with col1:
-    st.subheader("Cash Rate History")
-    
-    if not df_rba.empty:
-        fig_rba = px.line(
-            df_rba, 
-            x='Date', 
-            y='Cash Rate', 
-            # title='RBA Official Cash Rate History', # Removed title to match clean look
-            template="plotly_dark" # Dark theme to match image
-        )
-        fig_rba.update_traces(line_color='#F4D03F') # Yellowish color from image
-        fig_rba.update_layout(
-            paper_bgcolor='rgba(0,0,0,0)',
-            plot_bgcolor='rgba(0,0,0,0)',
-            margin=dict(l=0, r=0, t=0, b=0),
-            height=300
-        )
+    with card_container(key="card_col1"):
+        st.subheader("Cash Rate History")
         
-        st.plotly_chart(fig_rba, width="stretch")
+        if not df_rba.empty:
+            fig_rba = px.line(
+                df_rba, 
+                x='Date', 
+                y='Cash Rate', 
+                # title='RBA Official Cash Rate History', # Removed title to match clean look
+                template="plotly_dark" # Dark theme to match image
+            )
+            fig_rba.update_traces(line_color='#F4D03F', hovertemplate='Date: %{x}<br>Value: %{y:.2f}%') # Yellowish color from image
+            fig_rba.update_layout(
+                paper_bgcolor='rgba(0,0,0,0)',
+                plot_bgcolor='rgba(0,0,0,0)',
+                margin=dict(l=0, r=0, t=0, b=0),
+                height=300
+            )
+            
+            st.plotly_chart(fig_rba, width="stretch")
 
 # --- Section 2: ABS Unemployment Chart ---
 with col2:
-    st.subheader("Unemployment Trend")
-    
-    if not df_abs.empty:
-        fig_abs = px.line(
-            df_abs, 
-            x='date', 
-            y='value', 
-            # title='Unemployment Rate (Seasonally Adjusted)',
-            template="plotly_dark"
-        )
-        fig_abs.update_traces(line_color='#33C1FF') # Blue color
-        fig_abs.update_layout(
-            paper_bgcolor='rgba(0,0,0,0)',
-            plot_bgcolor='rgba(0,0,0,0)',
-            margin=dict(l=0, r=0, t=0, b=0),
-            height=300
-        )
+    with card_container(key="card_col2"):
+        st.subheader("Unemployment Trend")
         
-        st.plotly_chart(fig_abs, width="stretch")
+        if not df_abs.empty:
+            fig_abs = px.line(
+                df_abs, 
+                x='date', 
+                y='value', 
+                # title='Unemployment Rate (Seasonally Adjusted)',
+                template="plotly_dark"
+            )
+            fig_abs.update_traces(line_color='#33C1FF', hovertemplate='Date: %{x}<br>Value: %{y:.2f}%') # Blue color
+            fig_abs.update_layout(
+                paper_bgcolor='rgba(0,0,0,0)',
+                plot_bgcolor='rgba(0,0,0,0)',
+                margin=dict(l=0, r=0, t=0, b=0),
+                height=300,
+                yaxis_tickformat='.2f'
+            )
+            
+            st.plotly_chart(fig_abs, width="stretch")
 
 # --- Data Explorer / Table View ---
 with st.expander("📊 View Raw Data"):
