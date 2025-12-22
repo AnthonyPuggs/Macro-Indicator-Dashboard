@@ -12,8 +12,22 @@ st.set_page_config(
     layout="wide"
 )
 
-st.title("🇦🇺 Australian Macroeconomic Indicator Dashboard")
-st.markdown("Data sourced live from the **RBA** and **ABS** using the `readabs` Python library.")
+# --- Sidebar ---
+with st.sidebar:
+    st.title("Aus Macro DB")
+    st.caption("v2.1 Experimental")
+    
+    st.markdown("### DASHBOARDS")
+    st.button("Overview", use_container_width=True, type="primary")
+    st.button("Phillips Curve Model", use_container_width=True)
+    
+    st.markdown("### DEVELOPER")
+    st.button("Source Code", use_container_width=True)
+    st.button("Economic Theory", use_container_width=True)
+    
+    st.markdown("---")
+    st.markdown("**Assistant Mode**")
+    st.caption("Online • RBA Data Ready")
 
 # --- Helper Functions ---
 
@@ -25,8 +39,6 @@ def get_rba_data():
         ocr_series = ra.read_rba_ocr()
         
         # FIX 1: Convert PeriodIndex to Timestamp for Plotly compatibility
-        # If the index is already datetime, this line is harmless. 
-        # If it is a Period (e.g. '2023-11'), it becomes 2023-11-01.
         if isinstance(ocr_series.index, pd.PeriodIndex):
             ocr_series.index = ocr_series.index.to_timestamp()
         
@@ -77,75 +89,189 @@ def get_abs_data():
     except Exception as e:
         st.error(f"Error fetching ABS data: {e}")
         return pd.DataFrame()
-        
-# --- Main App Layout ---
 
-col1, col2 = st.columns(2)
+@st.cache_data(ttl=3600)
+def get_inflation_data():
+    """Fetches CPI Trimmed Mean from RBA Table G1."""
+    try:
+        # RBA Table G1: Consumer Price Inflation
+        df_g1, meta = ra.read_rba_table("G1")
+        
+        # Column: GCPIOCPMTMYP (Trimmed Mean - Year-ended % change)
+        if 'GCPIOCPMTMYP' in df_g1.columns:
+            series = df_g1['GCPIOCPMTMYP']
+            df = series.reset_index()
+            df.columns = ['Date', 'Value']
+            
+            if isinstance(df['Date'].dtype, pd.PeriodDtype) or isinstance(df['Date'].iloc[0], pd.Period):
+                 df['Date'] = df['Date'].dt.to_timestamp()
+            
+            df = df.sort_values('Date')
+            # Filter out future dates (forecasts) if any, or just take the latest available
+            # RBA tables might contain forecasts. Let's keep all for now or filter <= today?
+            # Usually we want the latest actual.
+            # Let's just return it all and handle display logic.
+            return df
+        return pd.DataFrame()
+    except Exception as e:
+        st.error(f"Error fetching Inflation data: {e}")
+        return pd.DataFrame()
+
+@st.cache_data(ttl=3600)
+def get_exp_inflation_data():
+    """Fetches Inflation Expectations from RBA Table G3."""
+    try:
+        # RBA Table G3: Inflation Expectations
+        df_g3, meta = ra.read_rba_table("G3")
+        
+        # Column: GMAREXPY (Market Economists - 1 year ahead)
+        if 'GMAREXPY' in df_g3.columns:
+            series = df_g3['GMAREXPY']
+            df = series.reset_index()
+            df.columns = ['Date', 'Value']
+            
+            if isinstance(df['Date'].dtype, pd.PeriodDtype) or isinstance(df['Date'].iloc[0], pd.Period):
+                 df['Date'] = df['Date'].dt.to_timestamp()
+            
+            df = df.sort_values('Date')
+            return df
+        return pd.DataFrame()
+    except Exception as e:
+        st.error(f"Error fetching Exp Inflation data: {e}")
+        return pd.DataFrame()
+
+# --- Main App Layout ---
 
 # Load Data
 with st.spinner('Fetching data from RBA and ABS...'):
     df_rba = get_rba_data()
     df_abs = get_abs_data()
+    df_cpi = get_inflation_data()
+    df_exp = get_exp_inflation_data()
 
-# --- Section 1: RBA Cash Rate ---
-with col1:
-    st.subheader("🏦 RBA Official Cash Rate")
-    
+# --- Metrics Row ---
+m1, m2, m3, m4 = st.columns(4)
+
+# 1. RBA Cash Rate
+with m1:
     if not df_rba.empty:
         latest_ocr = df_rba['Cash Rate'].iloc[-1]
         prev_ocr = df_rba['Cash Rate'].iloc[-2]
         delta = latest_ocr - prev_ocr
         
         st.metric(
-            label="Current Cash Rate", 
-            value=f"{latest_ocr}%", 
-            delta=f"{delta:.2f}%",
-            delta_color="inverse"
+            label="RBA Cash Rate", 
+            value=f"{latest_ocr:.2f}%", 
+            delta=f"{delta:.2f}% (Held)" if delta == 0 else f"{delta:.2f}%",
+            delta_color="off" if delta == 0 else "inverse"
         )
-        
-        fig_rba = px.line(
-            df_rba, 
-            x='Date', 
-            y='Cash Rate', 
-            title='RBA Official Cash Rate History',
-            template="plotly_white"
-        )
-        fig_rba.update_traces(line_color='#FF5733')
-        
-        # FIX 3: Replaced deprecated use_container_width=True with width="stretch"
-        st.plotly_chart(fig_rba, width="stretch")
+    else:
+        st.metric("RBA Cash Rate", "N/A")
 
-# --- Section 2: ABS Unemployment ---
-with col2:
-    st.subheader("👷 ABS Unemployment Rate")
-    
+# 2. Unemployment
+with m2:
     if not df_abs.empty:
         latest_unemp = df_abs['value'].iloc[-1]
         prev_unemp = df_abs['value'].iloc[-2]
         delta_unemp = latest_unemp - prev_unemp
         
         st.metric(
-            label="Unemployment Rate (Seas. Adj.)", 
+            label="Unemployment", 
             value=f"{latest_unemp}%", 
-            delta=f"{delta_unemp:.2f}%",
+            delta=f"{delta_unemp:.1f}% vs prev month",
             delta_color="inverse"
         )
+    else:
+        st.metric("Unemployment", "N/A")
+
+# 3. CPI (Trimmed)
+with m3:
+    if not df_cpi.empty:
+        # Get latest non-NaN value
+        valid_cpi = df_cpi.dropna()
+        if not valid_cpi.empty:
+            latest_cpi = valid_cpi['Value'].iloc[-1]
+            # Target: 2-3%
+            st.metric(
+                label="CPI (Trimmed)", 
+                value=f"{latest_cpi}%", 
+                delta="Target: 2-3%",
+                delta_color="off" # Grey color for target
+            )
+        else:
+            st.metric("CPI (Trimmed)", "N/A")
+    else:
+        st.metric("CPI (Trimmed)", "N/A")
+
+# 4. Exp. Inflation (1yr)
+with m4:
+    if not df_exp.empty:
+        valid_exp = df_exp.dropna()
+        if not valid_exp.empty:
+            latest_exp = valid_exp['Value'].iloc[-1]
+            st.metric(
+                label="Exp. Inflation (1yr)", 
+                value=f"{latest_exp}%", 
+                delta="Market Economists",
+                delta_color="off"
+            )
+        else:
+            st.metric("Exp. Inflation (1yr)", "N/A")
+    else:
+        st.metric("Exp. Inflation (1yr)", "N/A")
+
+st.markdown("---")
+
+# --- Charts Row ---
+col1, col2 = st.columns(2)
+
+# --- Section 1: RBA Cash Rate Chart ---
+with col1:
+    st.subheader("Cash Rate History")
+    
+    if not df_rba.empty:
+        fig_rba = px.line(
+            df_rba, 
+            x='Date', 
+            y='Cash Rate', 
+            # title='RBA Official Cash Rate History', # Removed title to match clean look
+            template="plotly_dark" # Dark theme to match image
+        )
+        fig_rba.update_traces(line_color='#F4D03F') # Yellowish color from image
+        fig_rba.update_layout(
+            paper_bgcolor='rgba(0,0,0,0)',
+            plot_bgcolor='rgba(0,0,0,0)',
+            margin=dict(l=0, r=0, t=0, b=0),
+            height=300
+        )
         
+        st.plotly_chart(fig_rba, width="stretch")
+
+# --- Section 2: ABS Unemployment Chart ---
+with col2:
+    st.subheader("Unemployment Trend")
+    
+    if not df_abs.empty:
         fig_abs = px.line(
             df_abs, 
             x='date', 
             y='value', 
-            title='Unemployment Rate (Seasonally Adjusted)',
-            template="plotly_white"
+            # title='Unemployment Rate (Seasonally Adjusted)',
+            template="plotly_dark"
         )
-        fig_abs.update_traces(line_color='#33C1FF')
+        fig_abs.update_traces(line_color='#33C1FF') # Blue color
+        fig_abs.update_layout(
+            paper_bgcolor='rgba(0,0,0,0)',
+            plot_bgcolor='rgba(0,0,0,0)',
+            margin=dict(l=0, r=0, t=0, b=0),
+            height=300
+        )
         
-        # FIX 3: Replaced deprecated use_container_width=True with width="stretch"
         st.plotly_chart(fig_abs, width="stretch")
 
 # --- Data Explorer / Table View ---
 with st.expander("📊 View Raw Data"):
-    tab1, tab2 = st.tabs(["RBA Data", "ABS Data"])
+    tab1, tab2, tab3, tab4 = st.tabs(["RBA Cash Rate", "Unemployment", "CPI", "Exp. Inflation"])
     
     with tab1:
         if not df_rba.empty:
@@ -153,9 +279,15 @@ with st.expander("📊 View Raw Data"):
             
     with tab2:
         if not df_abs.empty:
-            # FIX: We removed specific column selection like [['date', 'value', 'series_id']]
-            # Just showing the whole dataframe is safer and cleaner.
             st.dataframe(df_abs.sort_values('date', ascending=False), width="stretch")
+            
+    with tab3:
+        if not df_cpi.empty:
+            st.dataframe(df_cpi.sort_values('Date', ascending=False), width="stretch")
+            
+    with tab4:
+        if not df_exp.empty:
+            st.dataframe(df_exp.sort_values('Date', ascending=False), width="stretch")
 
 st.markdown("---")
 st.caption("Dashboard generated using Streamlit and `readabs`.")
